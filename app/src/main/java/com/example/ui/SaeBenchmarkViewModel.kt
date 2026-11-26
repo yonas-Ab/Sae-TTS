@@ -75,6 +75,15 @@ data class ComparisonUiState(
     val runState: ComparisonRunState = ComparisonRunState.Idle,
 )
 
+data class StorageSummary(
+    val modelsBytes: Long = 0L,
+    val partialsBytes: Long = 0L,
+    val lexiconBytes: Long = 0L,
+    val audioCacheBytes: Long = 0L,
+    val availableBytes: Long = 0L,
+    val modelsRootPath: String = "",
+)
+
 class SaeBenchmarkViewModel(application: Application) : AndroidViewModel(application) {
 
     private val modelRepository = ModelRepository(application)
@@ -135,6 +144,9 @@ class SaeBenchmarkViewModel(application: Application) : AndroidViewModel(applica
     private val _audioCacheBytes = MutableStateFlow(0L)
     val audioCacheBytes: StateFlow<Long> = _audioCacheBytes.asStateFlow()
 
+    private val _storageSummary = MutableStateFlow(StorageSummary())
+    val storageSummary: StateFlow<StorageSummary> = _storageSummary.asStateFlow()
+
     private val _speechTestState = MutableStateFlow(SpeechTestUiState())
     val speechTestState: StateFlow<SpeechTestUiState> = _speechTestState.asStateFlow()
 
@@ -165,15 +177,23 @@ class SaeBenchmarkViewModel(application: Application) : AndroidViewModel(applica
 
     fun refreshStorageAndModels() {
         _modelStatuses.value = modelRepository.inspectAllModels()
-        _availableStorageBytes.value = modelRepository.getAvailableStorageBytes()
-        _audioCacheBytes.value = audioFileManager.getAudioOutputsSizeBytes()
+        val avail = modelRepository.getAvailableStorageBytes()
+        val audioBytes = audioFileManager.getAudioOutputsSizeBytes()
+        _availableStorageBytes.value = avail
+        _audioCacheBytes.value = audioBytes
+        _storageSummary.value = StorageSummary(
+            modelsBytes = modelRepository.getModelsTotalSizeBytes(),
+            partialsBytes = modelRepository.getPartialDownloadsTotalBytes(),
+            lexiconBytes = modelRepository.getSharedLexiconSizeBytes(),
+            audioCacheBytes = audioBytes,
+            availableBytes = avail,
+            modelsRootPath = modelRepository.getModelsRootDir().absolutePath,
+        )
         _deviceTelemetry.value = performanceMonitor.captureTelemetry()
     }
 
     fun refreshDeviceTelemetry() {
-        _deviceTelemetry.value = performanceMonitor.captureTelemetry()
-        _availableStorageBytes.value = modelRepository.getAvailableStorageBytes()
-        _audioCacheBytes.value = audioFileManager.getAudioOutputsSizeBytes()
+        refreshStorageAndModels()
     }
 
     // --- Model Management ---
@@ -235,6 +255,30 @@ class SaeBenchmarkViewModel(application: Application) : AndroidViewModel(applica
             }.onFailure { err ->
                 _toastEvents.tryEmit(err.message ?: "Lexicon download failed.")
             }
+        }
+    }
+
+    fun deleteSharedLexicon() {
+        viewModelScope.launch {
+            modelRepository.deleteSharedLexicon()
+            refreshStorageAndModels()
+            runPhonemePreview(_phonemeInputText.value)
+            _toastEvents.tryEmit("Shared lexicon deleted.")
+        }
+    }
+
+    fun verifyAllModels() {
+        refreshStorageAndModels()
+        val installedCount = _modelStatuses.value.values.count { it.isInstalled }
+        _toastEvents.tryEmit("Verified $installedCount of ${ModelManifest.allModels.size} models on disk.")
+    }
+
+    fun clearAllPartialDownloads() {
+        viewModelScope.launch {
+            val deleted = modelRepository.clearAllPartialDownloads()
+            ModelManifest.allModels.forEach { downloadManager.resetState(it.id) }
+            refreshStorageAndModels()
+            _toastEvents.tryEmit(if (deleted > 0) "Cleaned $deleted partial download file(s)." else "No partial files to clean.")
         }
     }
 

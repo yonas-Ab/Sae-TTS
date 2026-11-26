@@ -63,24 +63,35 @@ Download pipeline (`ModelDownloadManager`):
 
 ---
 
-## Build & Device Installation
+## Build, GitHub Actions CI/CD & Device Installation
 
 ### Prerequisites
 - Android SDK (API 26–36, NDK/ABI `arm64-v8a` support)
-- JDK 11+ & Gradle (`gradle` CLI)
-- Network access on first build so Gradle task `:app:downloadSherpaOnnxAar` fetches official `sherpa-onnx-1.12.36.aar` into `app/libs/`.
+- JDK 17+
+- Network access on first build so Gradle task `:app:downloadSherpaOnnxAar` fetches official `sherpa-onnx-1.12.36.aar` into `app/libs/` (`app/.gitignore` excludes `libs/*.aar` so GitHub pushes stay under file-size limits).
 
-### Build Commands
+### GitHub Actions Automated APK Builds
+The repository includes `.github/workflows/android-build.yml` and the Gradle Wrapper (`gradlew`, `gradlew.bat`, `gradle/wrapper/gradle-wrapper.jar` for Gradle `9.3.1`):
+- Every push or pull request to `main`/`master` (or manual `workflow_dispatch`) automatically:
+  1. Decodes `debug.keystore.base64` to `debug.keystore` and prepares `.env` from `.env.example`.
+  2. Downloads & caches `sherpa-onnx-1.12.36.aar`.
+  3. Runs `./gradlew testDebugUnitTest --no-daemon`.
+  4. Builds and uploads `sae-tts-benchmark-debug-apk` (`app/build/outputs/apk/debug/app-debug.apk`) as a downloadable workflow artifact.
+- Pushing a `v*` git tag with repository secrets (`KEYSTORE_BASE64`, `STORE_PASSWORD`, `KEY_PASSWORD`) builds a signed release APK artifact (`sae-tts-benchmark-release-apk`).
+
+### Local Build Commands
 ```bash
 # Run JVM & Robolectric unit tests
-gradle :app:testDebugUnitTest
+./gradlew testDebugUnitTest
 
 # Build debug APK
-gradle :app:assembleDebug
+./gradlew assembleDebug
 
 # Build release APK (requires signing env vars if packaging for release)
-gradle :app:assembleRelease
+./gradlew assembleRelease
 ```
+
+*(Note: in cloud environments without the wrapper script, substitute `./gradlew` with `gradle`.)*
 
 ### Install on Device (TECNO Pop 8 / Android 13)
 ```bash

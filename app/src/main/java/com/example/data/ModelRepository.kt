@@ -183,4 +183,37 @@ class ModelRepository(private val context: Context) {
         }
         return sum
     }
+
+    fun getModelsTotalSizeBytes(): Long {
+        return ModelManifest.allModels.sumOf { spec ->
+            val dir = getModelDir(spec.id)
+            if (dir.exists()) calculateDirectorySize(dir) else 0L
+        }
+    }
+
+    fun getPartialDownloadsTotalBytes(): Long {
+        val tempDir = getDownloadsTempDir()
+        if (!tempDir.exists()) return 0L
+        return tempDir.listFiles()?.sumOf { it.length() } ?: 0L
+    }
+
+    fun clearAllPartialDownloads(): Int {
+        val tempDir = getDownloadsTempDir()
+        if (!tempDir.exists()) return 0
+        var deleted = 0
+        tempDir.listFiles()?.forEach { file ->
+            if (file.delete()) deleted++
+        }
+        return deleted
+    }
+
+    fun getSharedLexiconSizeBytes(): Long {
+        val lex = getSharedLexiconFile()
+        return if (lex.exists() && lex.isFile) lex.length() else 0L
+    }
+
+    fun deleteSharedLexicon(): Boolean {
+        val lex = getSharedLexiconFile()
+        return if (lex.exists()) lex.delete() else true
+    }
 }

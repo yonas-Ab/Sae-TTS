@@ -1,6 +1,7 @@
 package com.example.ui
 
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -16,17 +17,19 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Cancel
-import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.CleaningServices
 import androidx.compose.material.icons.filled.CloudDownload
 import androidx.compose.material.icons.filled.DeleteOutline
+import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Memory
 import androidx.compose.material.icons.filled.PlayCircleOutline
-import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.SdStorage
 import androidx.compose.material.icons.filled.StopCircle
+import androidx.compose.material.icons.filled.Verified
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -43,6 +46,9 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -53,7 +59,6 @@ import com.example.data.ModelManifest
 import com.example.data.TtsModelId
 import com.example.data.TtsModelSpec
 import com.example.tts.EngineState
-import com.example.ui.components.MetricTile
 import com.example.ui.components.StatusPill
 import com.example.ui.components.formatBytesHuman
 import com.example.ui.components.formatSecondsShort
@@ -62,9 +67,10 @@ import java.util.Locale
 @Composable
 fun HomeScreen(
     deviceTelemetry: DeviceTelemetry,
-    availableStorageBytes: Long,
+    storageSummary: StorageSummary,
     modelStatuses: Map<TtsModelId, InstalledModelStatus>,
     downloadStates: Map<TtsModelId, DownloadPhase>,
+    lexiconStatus: String?,
     engineState: EngineState,
     threadCount: Int,
     onDownloadModel: (TtsModelId) -> Unit,
@@ -74,7 +80,10 @@ fun HomeScreen(
     onLoadModel: (TtsModelId) -> Unit,
     onUnloadModel: () -> Unit,
     onOpenModelDetails: (TtsModelId) -> Unit,
-    onRefreshTelemetry: () -> Unit,
+    onVerifyAllModels: () -> Unit,
+    onClearAllPartials: () -> Unit,
+    onDownloadLexicon: () -> Unit,
+    onDeleteLexicon: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     LazyColumn(
@@ -84,13 +93,24 @@ fun HomeScreen(
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         item {
-            DeviceTelemetryHeaderCard(
+            ModelStorageManagerCard(
                 telemetry = deviceTelemetry,
-                availableStorageBytes = availableStorageBytes,
+                storageSummary = storageSummary,
                 engineState = engineState,
                 threadCount = threadCount,
-                onRefresh = onRefreshTelemetry,
-                onUnload = onUnloadModel,
+                onVerifyAll = onVerifyAllModels,
+                onClearPartials = onClearAllPartials,
+                onUnloadEngine = onUnloadModel,
+                modifier = Modifier.widthIn(max = 720.dp),
+            )
+        }
+
+        item {
+            SharedLexiconManagerCard(
+                lexiconBytes = storageSummary.lexiconBytes,
+                lexiconStatus = lexiconStatus,
+                onDownload = onDownloadLexicon,
+                onDelete = onDeleteLexicon,
                 modifier = Modifier.widthIn(max = 720.dp),
             )
         }
@@ -105,13 +125,13 @@ fun HomeScreen(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(
-                    text = "Offline Neural TTS Models",
+                    text = "Managed Offline Models",
                     style = MaterialTheme.typography.titleLarge,
                 )
                 Text(
-                    text = "Single-model residency",
+                    text = "${modelStatuses.values.count { it.isInstalled }} / ${ModelManifest.allModels.size} installed",
                     style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = MaterialTheme.colorScheme.primary,
                 )
             }
         }
@@ -142,15 +162,29 @@ fun HomeScreen(
 }
 
 @Composable
-private fun DeviceTelemetryHeaderCard(
+private fun ModelStorageManagerCard(
     telemetry: DeviceTelemetry,
-    availableStorageBytes: Long,
+    storageSummary: StorageSummary,
     engineState: EngineState,
     threadCount: Int,
-    onRefresh: () -> Unit,
-    onUnload: () -> Unit,
+    onVerifyAll: () -> Unit,
+    onClearPartials: () -> Unit,
+    onUnloadEngine: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val totalUsedByApp = (
+        storageSummary.modelsBytes +
+            storageSummary.partialsBytes +
+            storageSummary.lexiconBytes +
+            storageSummary.audioCacheBytes
+        ).coerceAtLeast(1L)
+    val scaleTotal = maxOf(totalUsedByApp, 512L * 1024L * 1024L).toFloat()
+
+    val modelsColor = MaterialTheme.colorScheme.primary
+    val audioColor = MaterialTheme.colorScheme.secondary
+    val partialsColor = MaterialTheme.colorScheme.tertiary
+    val trackColor = MaterialTheme.colorScheme.surfaceVariant
+
     Card(
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.45f)),
@@ -159,75 +193,156 @@ private fun DeviceTelemetryHeaderCard(
     ) {
         Column(
             modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = "${telemetry.manufacturer.uppercase(Locale.US)} ${telemetry.deviceModel}",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold,
-                    )
-                    Text(
-                        text = "Android ${telemetry.androidVersion} (API ${telemetry.apiLevel}) • ${telemetry.supportedAbis.firstOrNull() ?: "unknown"} • ${telemetry.cpuCores} cores",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Filled.FolderOpen, contentDescription = "Storage manager", tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Model Storage & Residency", style = MaterialTheme.typography.titleMedium)
                 }
+                StatusPill(
+                    text = "${formatBytesHuman(storageSummary.availableBytes)} free",
+                    containerColor = MaterialTheme.colorScheme.primaryContainer,
+                    contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                )
+            }
+
+            // Segmented allocation bar
+            Canvas(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(10.dp)
+                    .clip(RoundedCornerShape(6.dp)),
+            ) {
+                drawRect(color = trackColor, size = size)
+                var x = 0f
+                val modelsW = (storageSummary.modelsBytes / scaleTotal) * size.width
+                if (modelsW > 0f) {
+                    drawRect(color = modelsColor, topLeft = Offset(x, 0f), size = Size(modelsW, size.height))
+                    x += modelsW
+                }
+                val audioW = (storageSummary.audioCacheBytes / scaleTotal) * size.width
+                if (audioW > 0f) {
+                    drawRect(color = audioColor, topLeft = Offset(x, 0f), size = Size(audioW, size.height))
+                    x += audioW
+                }
+                val partW = ((storageSummary.partialsBytes + storageSummary.lexiconBytes) / scaleTotal) * size.width
+                if (partW > 0f) {
+                    drawRect(color = partialsColor, topLeft = Offset(x, 0f), size = Size(partW, size.height))
+                }
+            }
+
+            Text(
+                text = "Models: ${formatBytesHuman(storageSummary.modelsBytes)} • WAVs: ${formatBytesHuman(storageSummary.audioCacheBytes)} • Partials: ${formatBytesHuman(storageSummary.partialsBytes)}",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Text(
+                text = storageSummary.modelsRootPath.ifBlank { "Android/data/<package>/files/models" },
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.primary,
+            )
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                OutlinedButton(
+                    onClick = onVerifyAll,
+                    modifier = Modifier
+                        .weight(1f)
+                        .defaultMinSize(minHeight = 48.dp)
+                        .testTag("verify_all_models_button"),
+                ) {
+                    Icon(Icons.Filled.Verified, contentDescription = "Verify installed models", modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("Verify Disk")
+                }
+                if (storageSummary.partialsBytes > 0L) {
+                    OutlinedButton(
+                        onClick = onClearPartials,
+                        modifier = Modifier
+                            .weight(1f)
+                            .defaultMinSize(minHeight = 48.dp)
+                            .testTag("clear_all_partials_button"),
+                    ) {
+                        Icon(Icons.Filled.CleaningServices, contentDescription = "Clean partial files", modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Clean Partials")
+                    }
+                }
+            }
+
+            ActiveEngineStrip(
+                engineState = engineState,
+                telemetry = telemetry,
+                threadCount = threadCount,
+                onUnload = onUnloadEngine,
+            )
+        }
+    }
+}
+
+@Composable
+private fun SharedLexiconManagerCard(
+    lexiconBytes: Long,
+    lexiconStatus: String?,
+    onDownload: () -> Unit,
+    onDelete: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val installed = lexiconBytes > 10_000L
+    Card(
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.4f)),
+        modifier = modifier.fillMaxWidth(),
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 14.dp, vertical = 12.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text("Shared English Lexicon (lexicon-en-us.txt)", style = MaterialTheme.typography.titleMedium)
+                Text(
+                    text = when {
+                        lexiconStatus != null -> lexiconStatus
+                        installed -> "Installed (${formatBytesHuman(lexiconBytes)}) • Optional fallback & G2P lab"
+                        else -> "Optional (~1.3 MB) • Enhances Kokoro/Phoneme Lab G2P lookup"
+                    },
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Spacer(modifier = Modifier.width(8.dp))
+            if (installed) {
                 IconButton(
-                    onClick = onRefresh,
+                    onClick = onDelete,
                     modifier = Modifier
                         .size(48.dp)
-                        .testTag("refresh_telemetry_button"),
+                        .testTag("delete_shared_lexicon_button"),
                 ) {
-                    Icon(
-                        imageVector = Icons.Filled.Refresh,
-                        contentDescription = "Refresh device telemetry",
-                    )
+                    Icon(Icons.Filled.DeleteOutline, contentDescription = "Delete shared lexicon", tint = MaterialTheme.colorScheme.error)
+                }
+            } else {
+                FilledTonalButton(
+                    onClick = onDownload,
+                    modifier = Modifier
+                        .defaultMinSize(minHeight = 48.dp)
+                        .testTag("manager_download_lexicon_button"),
+                ) {
+                    Icon(Icons.Filled.CloudDownload, contentDescription = "Download shared lexicon", modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("Get")
                 }
             }
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                MetricTile(
-                    label = "FREE RAM",
-                    value = "${telemetry.availableRamMb} / ${telemetry.totalRamMb} MB",
-                    accent = if (telemetry.lowMemoryFlag) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.secondary,
-                    modifier = Modifier.weight(1f),
-                )
-                MetricTile(
-                    label = "APP RSS",
-                    value = telemetry.processRssMb?.let { String.format(Locale.US, "%.0f MB", it) } ?: "N/A",
-                    accent = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.weight(1f),
-                )
-            }
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                MetricTile(
-                    label = "FREE STORAGE",
-                    value = formatBytesHuman(availableStorageBytes),
-                    accent = MaterialTheme.colorScheme.tertiary,
-                    modifier = Modifier.weight(1f),
-                )
-                MetricTile(
-                    label = "THREADS",
-                    value = "$threadCount CPU",
-                    accent = MaterialTheme.colorScheme.onSurface,
-                    modifier = Modifier.weight(1f),
-                )
-            }
-
-            ActiveEngineStrip(engineState = engineState, onUnload = onUnload)
         }
     }
 }
@@ -235,6 +350,8 @@ private fun DeviceTelemetryHeaderCard(
 @Composable
 private fun ActiveEngineStrip(
     engineState: EngineState,
+    telemetry: DeviceTelemetry,
+    threadCount: Int,
     onUnload: () -> Unit,
 ) {
     Surface(
@@ -258,18 +375,25 @@ private fun ActiveEngineStrip(
                     modifier = Modifier.size(18.dp),
                 )
                 Spacer(modifier = Modifier.width(8.dp))
-                val text = when (engineState) {
-                    is EngineState.Unloaded -> "No model loaded in RAM"
-                    is EngineState.Loading -> "Loading ${ModelManifest.byId(engineState.modelId).displayName}..."
-                    is EngineState.Loaded -> "Loaded: ${ModelManifest.byId(engineState.modelId).displayName} (${engineState.initTimeMs} ms)"
-                    is EngineState.Synthesizing -> "Synthesizing on ${ModelManifest.byId(engineState.modelId).displayName}..."
-                    is EngineState.Error -> "Engine error: ${engineState.message}"
+                Column {
+                    val text = when (engineState) {
+                        is EngineState.Unloaded -> "RAM: Idle (0 models loaded)"
+                        is EngineState.Loading -> "Loading ${ModelManifest.byId(engineState.modelId).displayName}..."
+                        is EngineState.Loaded -> "Active: ${ModelManifest.byId(engineState.modelId).displayName} (${engineState.initTimeMs} ms)"
+                        is EngineState.Synthesizing -> "Synthesizing on ${ModelManifest.byId(engineState.modelId).displayName}..."
+                        is EngineState.Error -> "Error: ${engineState.message}"
+                    }
+                    Text(
+                        text = text,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = if (engineState is EngineState.Error) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface,
+                    )
+                    Text(
+                        text = "Free RAM: ${telemetry.availableRamMb} MB • App RSS: ${telemetry.processRssMb?.let { String.format(Locale.US, "%.0f MB", it) } ?: "N/A"} • ${threadCount}T",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                 }
-                Text(
-                    text = text,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = if (engineState is EngineState.Error) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface,
-                )
             }
             if (engineState is EngineState.Loaded) {
                 OutlinedButton(
@@ -401,7 +525,6 @@ private fun ModelBenchmarkCard(
                 )
             }
 
-            // Download / Verification / Extraction Progress UI
             when (downloadPhase) {
                 is DownloadPhase.Checking -> {
                     LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
@@ -469,7 +592,6 @@ private fun ModelBenchmarkCard(
                 else -> Unit
             }
 
-            // Action Buttons
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),

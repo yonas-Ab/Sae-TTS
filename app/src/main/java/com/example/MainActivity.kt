@@ -10,14 +10,18 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.CompareArrows
+import androidx.compose.material.icons.filled.Dashboard
 import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Storage
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.NavigationRail
@@ -45,6 +49,7 @@ import androidx.navigation.compose.rememberNavController
 import androidx.navigation.toRoute
 import com.example.data.TtsModelId
 import com.example.ui.ComparisonScreen
+import com.example.ui.DashboardScreen
 import com.example.ui.HistoryScreen
 import com.example.ui.HomeScreen
 import com.example.ui.ModelScreen
@@ -54,6 +59,7 @@ import com.example.ui.SpeechTestScreen
 import com.example.ui.theme.SaeTtsBenchmarkTheme
 import kotlinx.serialization.Serializable
 
+@Serializable data object DashboardRoute
 @Serializable data object ModelsRoute
 @Serializable data object SpeechRoute
 @Serializable data object CompareRoute
@@ -69,11 +75,11 @@ private data class TopLevelDestination(
 )
 
 private val topLevelDestinations = listOf(
+    TopLevelDestination("Dashboard", Icons.Filled.Dashboard, DashboardRoute, "nav_dashboard"),
     TopLevelDestination("Models", Icons.Filled.Storage, ModelsRoute, "nav_models"),
-    TopLevelDestination("Speech", Icons.Filled.GraphicEq, SpeechRoute, "nav_speech"),
+    TopLevelDestination("Speak", Icons.Filled.GraphicEq, SpeechRoute, "nav_speech"),
     TopLevelDestination("Compare", Icons.Filled.CompareArrows, CompareRoute, "nav_compare"),
     TopLevelDestination("History", Icons.Filled.History, HistoryRoute, "nav_history"),
-    TopLevelDestination("Settings", Icons.Filled.Settings, SettingsRoute, "nav_settings"),
 )
 
 class MainActivity : ComponentActivity() {
@@ -110,6 +116,7 @@ fun SaeBenchmarkRoot(
     val telemetry by viewModel.deviceTelemetry.collectAsStateWithLifecycle()
     val availableStorageBytes by viewModel.availableStorageBytes.collectAsStateWithLifecycle()
     val audioCacheBytes by viewModel.audioCacheBytes.collectAsStateWithLifecycle()
+    val storageSummary by viewModel.storageSummary.collectAsStateWithLifecycle()
     val speechState by viewModel.speechTestState.collectAsStateWithLifecycle()
     val comparisonState by viewModel.comparisonState.collectAsStateWithLifecycle()
     val benchmarks by viewModel.benchmarks.collectAsStateWithLifecycle()
@@ -130,13 +137,27 @@ fun SaeBenchmarkRoot(
     }
 
     val isDetailRoute = currentDest?.hasRoute<ModelDetailRoute>() == true
+    val isSettingsRoute = currentDest?.hasRoute<SettingsRoute>() == true
+    val isSecondaryScreen = isDetailRoute || isSettingsRoute
+
     val activeTitle = when {
-        currentDest?.hasRoute<ModelsRoute>() == true -> "Sae TTS Benchmark"
+        currentDest?.hasRoute<DashboardRoute>() == true -> "Sae TTS Dashboard"
+        currentDest?.hasRoute<ModelsRoute>() == true -> "Model Manager"
         currentDest?.hasRoute<SpeechRoute>() == true -> "Speech Test"
         currentDest?.hasRoute<CompareRoute>() == true -> "Model Comparison"
         currentDest?.hasRoute<HistoryRoute>() == true -> "Benchmark History"
         currentDest?.hasRoute<SettingsRoute>() == true -> "Settings & Phoneme Lab"
         else -> "Sae TTS Benchmark"
+    }
+
+    fun navigateTopLevel(route: Any) {
+        navController.navigate(route) {
+            popUpTo(navController.graph.findStartDestination().id) {
+                saveState = true
+            }
+            launchSingleTop = true
+            restoreState = true
+        }
     }
 
     BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
@@ -145,25 +166,49 @@ fun SaeBenchmarkRoot(
         Scaffold(
             topBar = {
                 if (!isDetailRoute) {
-                    TopAppBar(title = { Text(activeTitle) })
+                    TopAppBar(
+                        title = { Text(activeTitle) },
+                        navigationIcon = {
+                            if (isSettingsRoute) {
+                                IconButton(
+                                    onClick = { navController.popBackStack() },
+                                    modifier = Modifier
+                                        .size(48.dp)
+                                        .testTag("settings_back_button"),
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                                        contentDescription = "Back",
+                                    )
+                                }
+                            }
+                        },
+                        actions = {
+                            if (!isSettingsRoute) {
+                                IconButton(
+                                    onClick = { navController.navigate(SettingsRoute) },
+                                    modifier = Modifier
+                                        .size(48.dp)
+                                        .testTag("open_settings_button"),
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Filled.Settings,
+                                        contentDescription = "Open Settings and Phoneme Lab",
+                                    )
+                                }
+                            }
+                        },
+                    )
                 }
             },
             bottomBar = {
-                if (!useRail && !isDetailRoute) {
+                if (!useRail && !isSecondaryScreen) {
                     NavigationBar {
                         topLevelDestinations.forEach { dest ->
                             val selected = currentDest?.hierarchy?.any { it.hasRoute(dest.route::class) } == true
                             NavigationBarItem(
                                 selected = selected,
-                                onClick = {
-                                    navController.navigate(dest.route) {
-                                        popUpTo(navController.graph.findStartDestination().id) {
-                                            saveState = true
-                                        }
-                                        launchSingleTop = true
-                                        restoreState = true
-                                    }
-                                },
+                                onClick = { navigateTopLevel(dest.route) },
                                 icon = { Icon(dest.icon, contentDescription = dest.label) },
                                 label = { Text(dest.label) },
                                 modifier = Modifier.testTag(dest.testTag),
@@ -180,21 +225,13 @@ fun SaeBenchmarkRoot(
                     .fillMaxSize()
                     .padding(innerPadding),
             ) {
-                if (useRail && !isDetailRoute) {
+                if (useRail && !isSecondaryScreen) {
                     NavigationRail {
                         topLevelDestinations.forEach { dest ->
                             val selected = currentDest?.hierarchy?.any { it.hasRoute(dest.route::class) } == true
                             NavigationRailItem(
                                 selected = selected,
-                                onClick = {
-                                    navController.navigate(dest.route) {
-                                        popUpTo(navController.graph.findStartDestination().id) {
-                                            saveState = true
-                                        }
-                                        launchSingleTop = true
-                                        restoreState = true
-                                    }
-                                },
+                                onClick = { navigateTopLevel(dest.route) },
                                 icon = { Icon(dest.icon, contentDescription = dest.label) },
                                 label = { Text(dest.label) },
                                 modifier = Modifier.testTag(dest.testTag),
@@ -205,15 +242,33 @@ fun SaeBenchmarkRoot(
 
                 NavHost(
                     navController = navController,
-                    startDestination = ModelsRoute,
+                    startDestination = DashboardRoute,
                     modifier = Modifier.weight(1f),
                 ) {
+                    composable<DashboardRoute> {
+                        DashboardScreen(
+                            telemetry = telemetry,
+                            storageSummary = storageSummary,
+                            modelStatuses = modelStatuses,
+                            engineState = engineState,
+                            threadCount = settings.threadCount,
+                            benchmarks = benchmarks,
+                            ratings = ratings,
+                            onRefreshTelemetry = viewModel::refreshDeviceTelemetry,
+                            onNavigateToModels = { navigateTopLevel(ModelsRoute) },
+                            onNavigateToSpeech = { navigateTopLevel(SpeechRoute) },
+                            onNavigateToCompare = { navigateTopLevel(CompareRoute) },
+                            onNavigateToSettings = { navController.navigate(SettingsRoute) },
+                        )
+                    }
+
                     composable<ModelsRoute> {
                         HomeScreen(
                             deviceTelemetry = telemetry,
-                            availableStorageBytes = availableStorageBytes,
+                            storageSummary = storageSummary,
                             modelStatuses = modelStatuses,
                             downloadStates = downloadStates,
+                            lexiconStatus = lexiconStatus,
                             engineState = engineState,
                             threadCount = settings.threadCount,
                             onDownloadModel = viewModel::downloadModel,
@@ -225,7 +280,10 @@ fun SaeBenchmarkRoot(
                             onOpenModelDetails = { id ->
                                 navController.navigate(ModelDetailRoute(id.name))
                             },
-                            onRefreshTelemetry = viewModel::refreshDeviceTelemetry,
+                            onVerifyAllModels = viewModel::verifyAllModels,
+                            onClearAllPartials = viewModel::clearAllPartialDownloads,
+                            onDownloadLexicon = viewModel::downloadSharedLexicon,
+                            onDeleteLexicon = viewModel::deleteSharedLexicon,
                         )
                     }
 
