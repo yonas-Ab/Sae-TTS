@@ -1,0 +1,8 @@
+<resources>
+    <string name="app_name">Sae TTS Benchmark</string>
+    <string name="nav_models">Models</string>
+    <string name="nav_speak">Speech</string>
+    <string name="nav_compare">Compare</string>
+    <string name="nav_history">History</string>
+    <string name="nav_lab">Lab &amp; Config</string>
+</resources>

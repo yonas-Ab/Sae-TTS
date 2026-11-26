@@ -1,0 +1,6 @@
+{
+  "name": "Sae TTS Benchmark",
+  "description": "Offline neural text-to-speech benchmarking tool for low-resource Android devices using sherpa-onnx (Kitten Nano, Kokoro, and Supertonic-3).",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
