@@ -62,7 +62,7 @@ class ModelDownloadManager(
     private val activeJobs = ConcurrentHashMap<TtsModelId, Job>()
     private val activeCalls = ConcurrentHashMap<TtsModelId, Call>()
 
-    fun startDownload(spec: TtsModelSpec, scope: CoroutineScope) {
+    fun startDownload(spec: TtsModelSpec, scope: CoroutineScope, customUrl: String? = null) {
         if (activeJobs[spec.id]?.isActive == true) {
             return // Prevent duplicate download operations
         }
@@ -74,14 +74,15 @@ class ModelDownloadManager(
             return
         }
 
-        if (!spec.archiveUrl.startsWith("https://")) {
+        val effectiveUrl = customUrl?.trim()?.takeIf { it.isNotEmpty() } ?: spec.archiveUrl
+        if (!effectiveUrl.startsWith("https://")) {
             updatePhase(spec.id, DownloadPhase.Failed("Insecure download URL rejected (HTTPS required).", recoverable = false))
             return
         }
 
         val job = scope.launch(Dispatchers.IO) {
             try {
-                executeDownloadAndInstall(spec)
+                executeDownloadAndInstall(spec, effectiveUrl)
             } catch (_: CancellationException) {
                 val partialSize = repository.getPartialArchiveFile(spec.id).takeIf { it.exists() }?.length() ?: 0L
                 updatePhase(spec.id, DownloadPhase.Cancelled(partialSize))
@@ -160,7 +161,7 @@ class ModelDownloadManager(
         }
     }
 
-    private suspend fun executeDownloadAndInstall(spec: TtsModelSpec) {
+    private suspend fun executeDownloadAndInstall(spec: TtsModelSpec, downloadUrl: String) {
         updatePhase(spec.id, DownloadPhase.Checking)
 
         if (!repository.hasEnoughStorageFor(spec)) {
@@ -177,7 +178,7 @@ class ModelDownloadManager(
         val savedEtag = if (metaFile.exists()) metaFile.readText().trim() else ""
 
         val requestBuilder = Request.Builder()
-            .url(spec.archiveUrl)
+            .url(downloadUrl)
             .header("Accept-Encoding", "identity")
 
         if (existingBytes > 0L) {

@@ -198,9 +198,9 @@ class SaeBenchmarkViewModel(application: Application) : AndroidViewModel(applica
 
     // --- Model Management ---
 
-    fun downloadModel(modelId: TtsModelId) {
+    fun downloadModel(modelId: TtsModelId, customUrl: String? = null) {
         val spec = ModelManifest.byId(modelId)
-        downloadManager.startDownload(spec, viewModelScope)
+        downloadManager.startDownload(spec, viewModelScope, customUrl)
     }
 
     fun cancelDownload(modelId: TtsModelId) {

@@ -35,10 +35,22 @@ jobs:
             cp .env.example .env
           fi
 
-      - name: Decode debug.keystore from debug.keystore.base64
+      - name: Prepare debug.keystore for debugConfig signing
         run: |
-          if [ -f debug.keystore.base64 ] && [ ! -f debug.keystore ]; then
-            base64 --decode debug.keystore.base64 > debug.keystore
+          if [ ! -f debug.keystore ]; then
+            if [ -s debug.keystore.base64 ]; then
+              base64 --decode debug.keystore.base64 > debug.keystore
+            else
+              keytool -genkeypair -v \
+                -keystore debug.keystore \
+                -storepass android \
+                -alias androiddebugkey \
+                -keypass android \
+                -keyalg RSA \
+                -keysize 2048 \
+                -validity 10000 \
+                -dname "CN=Android Debug,O=Android,C=US"
+            fi
           fi
 
       - name: Cache sherpa-onnx AAR
@@ -111,14 +123,26 @@ jobs:
             cp .env.example .env
           fi
 
-      - name: Decode release keystore and debug keystore
+      - name: Decode release keystore and prepare debug keystore
         if: steps.check_secrets.outputs.has_keystore == 'true'
         env:
           KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
         run: |
           echo "$KEYSTORE_BASE64" | base64 --decode > my-upload-key.jks
-          if [ -f debug.keystore.base64 ] && [ ! -f debug.keystore ]; then
-            base64 --decode debug.keystore.base64 > debug.keystore
+          if [ ! -f debug.keystore ]; then
+            if [ -s debug.keystore.base64 ]; then
+              base64 --decode debug.keystore.base64 > debug.keystore
+            else
+              keytool -genkeypair -v \
+                -keystore debug.keystore \
+                -storepass android \
+                -alias androiddebugkey \
+                -keypass android \
+                -keyalg RSA \
+                -keysize 2048 \
+                -validity 10000 \
+                -dname "CN=Android Debug,O=Android,C=US"
+            fi
           fi
 
       - name: Cache sherpa-onnx AAR

@@ -271,7 +271,7 @@ fun SaeBenchmarkRoot(
                             lexiconStatus = lexiconStatus,
                             engineState = engineState,
                             threadCount = settings.threadCount,
-                            onDownloadModel = viewModel::downloadModel,
+                            onDownloadModel = { id -> viewModel.downloadModel(id) },
                             onCancelDownload = viewModel::cancelDownload,
                             onDiscardPartial = viewModel::discardPartialDownload,
                             onDeleteModel = viewModel::deleteModel,
@@ -294,8 +294,10 @@ fun SaeBenchmarkRoot(
                         ModelScreen(
                             modelId = modelId,
                             status = modelStatuses[modelId],
+                            downloadPhase = downloadStates[modelId] ?: com.example.data.DownloadPhase.Idle,
                             onBack = { navController.popBackStack() },
-                            onDownload = { viewModel.downloadModel(modelId) },
+                            onDownload = { customUrl -> viewModel.downloadModel(modelId, customUrl) },
+                            onCancelDownload = { viewModel.cancelDownload(modelId) },
                             onLoad = { viewModel.loadModel(modelId) },
                             onDelete = { viewModel.deleteModel(modelId) },
                         )

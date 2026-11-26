@@ -280,10 +280,20 @@ fun DashboardScreen(
                         )
                         Text("No Telemetry Charts Yet", style = MaterialTheme.typography.titleMedium)
                         Text(
-                            text = "Download a model in Model Manager and run a Speech Test or Sequential Comparison to populate RTF, latency, memory, and quality charts.",
+                            text = "Download Kitten Nano, Kokoro, or Supertonic-3 in the Model Manager (Models tab), then run a Speech Test or Comparison.",
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
+                        Button(
+                            onClick = onNavigateToModels,
+                            modifier = Modifier
+                                .defaultMinSize(minHeight = 48.dp)
+                                .testTag("dash_empty_download_models_button"),
+                        ) {
+                            Icon(Icons.Filled.Storage, contentDescription = "Open Model Downloader", modifier = Modifier.size(18.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Open Model Downloader")
+                        }
                     }
                 }
             }
